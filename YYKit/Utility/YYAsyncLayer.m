@@ -147,7 +147,7 @@ static dispatch_queue_t YYAsyncLayerGetReleaseQueue() {
             }
             UIGraphicsBeginImageContextWithOptions(size, opaque, scale);
             CGContextRef context = UIGraphicsGetCurrentContext();
-            if (opaque && context) {
+            if (opaque) {
                 CGContextSaveGState(context); {
                     if (!backgroundColor || CGColorGetAlpha(backgroundColor) < 1) {
                         CGContextSetFillColorWithColor(context, [UIColor whiteColor].CGColor);
@@ -190,29 +190,30 @@ static dispatch_queue_t YYAsyncLayerGetReleaseQueue() {
     } else {
         [_sentinel increase];
         if (task.willDisplay) task.willDisplay(self);
-        UIGraphicsBeginImageContextWithOptions(self.bounds.size, self.opaque, self.contentsScale);
-        CGContextRef context = UIGraphicsGetCurrentContext();
-        if (self.opaque && context) {
-            CGSize size = self.bounds.size;
-            size.width *= self.contentsScale;
-            size.height *= self.contentsScale;
-            CGContextSaveGState(context); {
+        if (self.bounds.size.width < 1 || self.bounds.size.height < 1) {
+            CGImageRef image = (__bridge_retained CGImageRef)(self.contents);
+            self.contents = nil;
+            if (image) {
+                CFRelease(image);
+            }
+            return;
+        }
+        UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:self.bounds.size];
+        UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            if (self.opaque) {
                 if (!self.backgroundColor || CGColorGetAlpha(self.backgroundColor) < 1) {
-                    CGContextSetFillColorWithColor(context, [UIColor whiteColor].CGColor);
-                    CGContextAddRect(context, CGRectMake(0, 0, size.width, size.height));
-                    CGContextFillPath(context);
+                    CGContextSetFillColorWithColor(context.CGContext, [UIColor whiteColor].CGColor);
+                    [context fillRect:self.bounds];
                 }
                 if (self.backgroundColor) {
-                    CGContextSetFillColorWithColor(context, self.backgroundColor);
-                    CGContextAddRect(context, CGRectMake(0, 0, size.width, size.height));
-                    CGContextFillPath(context);
+                    CGContextSetFillColorWithColor(context.CGContext, self.backgroundColor);
+                    [context fillRect:self.bounds];
                 }
-            } CGContextRestoreGState(context);
-        }
-        task.display(context, self.bounds.size, ^{return NO;});
-        UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-        UIGraphicsEndImageContext();
+            }
+            task.display(context.CGContext, self.bounds.size, ^{return NO;});
+        }];
         self.contents = (__bridge id)(image.CGImage);
+        
         if (task.didDisplay) task.didDisplay(self, YES);
     }
 }

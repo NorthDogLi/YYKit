@@ -345,6 +345,13 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @property (nonatomic) CGFloat extraAccessoryViewHeight;
 
+/**
+  Show custom style scroll indicator instead of system.
+ */
+@property (nonatomic, assign) BOOL showScrollBar;
+@property (nonatomic, strong) UIColor *foreColor;
+@property (nonatomic, strong) UIColor *backColor;
+
 @end
 
 
@@ -398,6 +405,9 @@ IB_DESIGNABLE
 @property (nullable, nonatomic, readwrite, strong) __kindof UIView *inputView;
 @property (nullable, nonatomic, readwrite, strong) __kindof UIView *inputAccessoryView;
 @property (nonatomic) CGFloat extraAccessoryViewHeight;
+@property (nonatomic, assign) BOOL showScrollBar;
+@property (nonatomic, strong) UIColor *foreColor;
+@property (nonatomic, strong) UIColor *backColor;
 @end
 #endif // !TARGET_INTERFACE_BUILDER
 

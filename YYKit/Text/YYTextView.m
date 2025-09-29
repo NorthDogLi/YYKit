@@ -27,6 +27,7 @@
 #import "UIDevice+YYAdd.h"
 #import "UIApplication+YYAdd.h"
 #import "YYImage.h"
+#import "YYScrollBar.h"
 
 
 #define kDefaultUndoLevelMax 20 // Default maximum undo level
@@ -154,6 +155,8 @@ typedef NS_ENUM(NSUInteger, YYTextMoveDirection) {
         unsigned int firstResponderBeforeUndoAlert : 1;
     } _state;
 }
+
+@property (nonatomic, weak) YYScrollBar *scrollBar;
 
 @end
 
@@ -1118,6 +1121,9 @@ typedef NS_ENUM(NSUInteger, YYTextMoveDirection) {
         if (startIndex == 0) return nil;
         else startIndex--;
     }
+    if (startIndex >= _innerText.length) {
+        return nil;
+    }
     NSRange highlightRange = {0};
     NSAttributedString *text = _delectedText ? _delectedText : _innerText;
     YYTextHighlight *highlight = [text attribute:YYTextHighlightAttributeName
@@ -1441,11 +1447,14 @@ typedef NS_ENUM(NSUInteger, YYTextMoveDirection) {
             if (notify) [_inputDelegate selectionDidChange:self];
         }
     }
-    if (notify) [_inputDelegate textWillChange:self];
-    NSRange newRange = NSMakeRange(range.asRange.location, text.length);
-    [_innerText replaceCharactersInRange:range.asRange withString:text];
-    [_innerText removeDiscontinuousAttributesInRange:newRange];
-    if (notify) [_inputDelegate textDidChange:self];
+    
+    if (range.asRange.location + range.asRange.length <= _innerText.length) {
+        if (notify) [_inputDelegate textWillChange:self];
+        NSRange newRange = NSMakeRange(range.asRange.location, text.length);
+        [_innerText replaceCharactersInRange:range.asRange withString:text];
+        [_innerText removeDiscontinuousAttributesInRange:newRange];
+        if (notify) [_inputDelegate textDidChange:self];
+    }
 }
 
 /// Save current typing attributes to the attributes holder.
@@ -2475,6 +2484,41 @@ typedef NS_ENUM(NSUInteger, YYTextMoveDirection) {
     return layout.textBoundingSize;
 }
 
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    
+    if (!self.showScrollBar) {
+        return;
+    }
+    
+    if (self.showsVerticalScrollIndicator || self.showsHorizontalScrollIndicator) {
+        return;
+    }
+    
+    if (!self.scrollBar) {
+        CGSize size = self.frame.size;
+        YYTextLayout *layout = [YYTextLayout layoutWithContainerSize:CGSizeMake(size.width, CGFLOAT_MAX) text:[[NSAttributedString alloc] initWithString:self.text attributes:@{
+            NSFontAttributeName: self.font
+        }]];
+        
+        if (layout.textBoundingSize.height <= size.height) {
+            return;
+        }
+        
+        YYScrollBar *scrollBar = [[YYScrollBar alloc] initWithFrame:CGRectMake(self.origin.x + size.width - 3, self.origin.y, 3, size.height)];
+        if (self.foreColor) {
+            scrollBar.foreColor = self.foreColor;
+        }
+        if (self.backColor) {
+            scrollBar.backColor = self.backColor;
+        }
+        
+        scrollBar.barHeight = size.height / layout.textBoundingSize.height * size.height;
+        [self.superview addSubview:scrollBar];
+        self.scrollBar = scrollBar;
+    }
+}
+
 #pragma mark - Override UIResponder
 
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
@@ -3078,6 +3122,20 @@ typedef NS_ENUM(NSUInteger, YYTextMoveDirection) {
     if ([_outerDelegate respondsToSelector:_cmd]) {
         [_outerDelegate scrollViewDidScroll:scrollView];
     }
+    
+    if (!self.showScrollBar) {
+        return;
+    }
+    
+    if (self.showsVerticalScrollIndicator || self.showsHorizontalScrollIndicator) {
+        return;
+    }
+    
+    if (!self.scrollBar) {
+        return;
+    }
+    
+    self.scrollBar.yPosition = (_scrollBar.bounds.size.height - _scrollBar.barHeight) * scrollView.contentOffset.y / (scrollView.contentSize.height - _scrollBar.bounds.size.height);
 }
 
 - (void)scrollViewDidZoom:(UIScrollView *)scrollView {
@@ -3204,18 +3262,20 @@ typedef NS_ENUM(NSUInteger, YYTextMoveDirection) {
     
     // test if there's 'TextBinding' before the caret
     if (!_state.deleteConfirm && range.length == 0 && range.location > 0) {
-        NSRange effectiveRange;
-        YYTextBinding *binding = [_innerText attribute:YYTextBindingAttributeName atIndex:range.location - 1 longestEffectiveRange:&effectiveRange inRange:NSMakeRange(0, _innerText.length)];
-        if (binding && binding.deleteConfirm) {
-            _state.deleteConfirm = YES;
-            [_inputDelegate selectionWillChange:self];
-            _selectedTextRange = [YYTextRange rangeWithRange:effectiveRange];
-            _selectedTextRange = [self _correctedTextRange:_selectedTextRange];
-            [_inputDelegate selectionDidChange:self];
-            
-            [self _updateOuterProperties];
-            [self _updateSelectionView];
-            return;
+        if ((range.location - 1) < _innerText.length) {
+            NSRange effectiveRange;
+            YYTextBinding *binding = [_innerText attribute:YYTextBindingAttributeName atIndex:range.location - 1 longestEffectiveRange:&effectiveRange inRange:NSMakeRange(0, _innerText.length)];
+            if (binding && binding.deleteConfirm) {
+                _state.deleteConfirm = YES;
+                [_inputDelegate selectionWillChange:self];
+                _selectedTextRange = [YYTextRange rangeWithRange:effectiveRange];
+                _selectedTextRange = [self _correctedTextRange:_selectedTextRange];
+                [_inputDelegate selectionDidChange:self];
+                
+                [self _updateOuterProperties];
+                [self _updateSelectionView];
+                return;
+            }
         }
     }
     
@@ -3305,11 +3365,15 @@ typedef NS_ENUM(NSUInteger, YYTextMoveDirection) {
     if (!markedText) markedText = @"";
     if (_markedTextRange == nil) {
         _markedTextRange = [YYTextRange rangeWithRange:NSMakeRange(_selectedTextRange.end.offset, markedText.length)];
-        [_innerText replaceCharactersInRange:NSMakeRange(_selectedTextRange.end.offset, 0) withString:markedText];
+        if (_selectedTextRange.end.offset <= _innerText.length) {
+            [_innerText replaceCharactersInRange:NSMakeRange(_selectedTextRange.end.offset, 0) withString:markedText];
+        }
         _selectedTextRange = [YYTextRange rangeWithRange:NSMakeRange(_selectedTextRange.start.offset + selectedRange.location, selectedRange.length)];
     } else {
         _markedTextRange = [self _correctedTextRange:_markedTextRange];
-        [_innerText replaceCharactersInRange:_markedTextRange.asRange withString:markedText];
+        if (_markedTextRange.asRange.location + _markedTextRange.asRange.length <= _innerText.length) {
+            [_innerText replaceCharactersInRange:_markedTextRange.asRange withString:markedText];
+        }
         _markedTextRange = [YYTextRange rangeWithRange:NSMakeRange(_markedTextRange.start.offset, markedText.length)];
         _selectedTextRange = [YYTextRange rangeWithRange:NSMakeRange(_markedTextRange.start.offset + selectedRange.location, selectedRange.length)];
     }
